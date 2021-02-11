@@ -153,7 +153,7 @@ the code we used to measure the on-device training time is in `OnDeviceTraining`
 
 > ```
 > @inproceedings{yang2019characterizing,
->   title={characterizing impacts of heterogeneity in federated learning upon large-scale smartphone data},
+>   title={Characterizing impacts of heterogeneity in federated learning upon large-scale smartphone data},
 >   author={Yang, Chengxu and Wang Qipeng and Xu, Mengwei and Chen, Zhenpeng and Bian Kaigui and Liu, Yunxin and Liu, Xuanzhe},
 >   booktitle={The World Wide Web Conference},
 >   year={2021}
