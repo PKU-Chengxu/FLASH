@@ -19,7 +19,7 @@ Briefly speaking, we develop FLASH to incorporate **heterogeneity** into the fed
 
 The source code for measure the on-device training time is available in the [OnDeviceTraining](https://github.com/www21submission/flash/tree/master/OnDeviceTraining) directory
 
-**State(Behavior) Heterogeneity**: the state and running environment of participating clients can be various and dynamic. We follow [Google's FL system](https://arxiv.org/pdf/1902.01046.pdf), i.e., clients are available for training only when the device is idle, charging, and connected to WiFi. To simulate state heterogeneity, we provide a large-scale real-world state trace, which can be accessed [here](./data/sample_data.rar).
+**State(Behavior) Heterogeneity**: the state and running environment of participating clients can be various and dynamic. We follow [Google's FL system](https://arxiv.org/pdf/1902.01046.pdf), i.e., clients are available for training only when the device is idle, charging, and connected to WiFi. To simulate state heterogeneity, we provide a default state trace which can be accessed [here](./data/state_traces.json). This default trace is sampled from the large-scale real-world trace (as we use in our paper) that involves upto 136k devices.
 
 Note: FLASH will run in a heterogeneity-unaware (ideal) mode if trace file is not found or `hard_hete` and `behav_hete` are set to `False`
 
