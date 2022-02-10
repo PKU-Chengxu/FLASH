@@ -96,8 +96,8 @@ class ClientModel(Model):
                 global_step=tf.train.get_or_create_global_step())
 
             eval_metric_ops = tf.count_nonzero(correct_pred) - tf.count_nonzero(correct_unk) - tf.count_nonzero(correct_pad)
-
-        return features, labels, train_op, eval_metric_ops, self.cost
+        self.ms_loss = tf.math.reduce_mean(tf.math.square(loss))
+        return features, labels, train_op, eval_metric_ops, self.cost, self.ms_loss
 
     def build_rnn_graph(self, inputs):
         def make_cell():
@@ -215,8 +215,8 @@ class ClientModel(Model):
 
         for input_data, target_data, input_lengths, input_mask in self.batch_data(data, batch_size):
             with self.graph.as_default():
-                acc, loss = self.sess.run(
-                    [self.eval_metric_ops, self.loss],
+                acc, loss, ms_loss = self.sess.run(
+                    [self.eval_metric_ops, self.loss, self.ms_loss],
                     feed_dict={
                         self.features: input_data,
                         self.labels: target_data,
@@ -232,4 +232,4 @@ class ClientModel(Model):
 
         acc = float(tot_acc) / tot_samples  # this top 1 accuracy considers every pred. of unknown and padding as wrong
         loss = tot_loss / tot_batches  # the loss is already averaged over samples
-        return {'accuracy': acc, 'loss': loss}
+        return {'accuracy': acc, 'loss': loss, 'ms_loss': ms_loss}

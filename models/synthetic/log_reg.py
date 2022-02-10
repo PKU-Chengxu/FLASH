@@ -12,7 +12,7 @@ from utils.model_utils import batch_data
 
 class ClientModel(Model):
 
-    def __init__(self, seed, lr, num_classes, input_dim, cffg=None):
+    def __init__(self, seed, lr, num_classes, input_dim, cfg=None):
         self.num_classes = num_classes
         self.input_dim = input_dim
 
@@ -33,14 +33,14 @@ class ClientModel(Model):
             logits=logits)
         
         train_op = self.optimizer.minimize(
-            loss=loss,
+            loss=tf.reduce_mean(loss),
             global_step=tf.train.get_global_step())
 
         predictions = tf.argmax(logits, axis=-1)
         correct_pred = tf.equal(predictions, labels)
         eval_metric_ops = tf.count_nonzero(correct_pred)
         
-        return features, labels, train_op, eval_metric_ops, tf.reduce_mean(loss)
+        return features, labels, train_op, eval_metric_ops, tf.reduce_mean(loss), tf.math.reduce_mean(tf.math.square(loss))
 
     def process_x(self, raw_x_batch):
         return np.array(raw_x_batch)

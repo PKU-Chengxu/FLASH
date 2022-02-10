@@ -45,13 +45,13 @@ class ClientModel(Model):
           "classes": tf.argmax(input=logits, axis=1),
           "probabilities": tf.nn.softmax(logits, name="softmax_tensor")
         }
-        loss = tf.losses.sparse_softmax_cross_entropy(labels=labels, logits=logits)
+        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels, logits=logits)
         # TODO: Confirm that opt initialized once is ok?
         train_op = self.optimizer.minimize(
-            loss=loss,
+            loss=tf.math.reduce_mean(loss),
             global_step=tf.train.get_global_step())
         eval_metric_ops = tf.count_nonzero(tf.equal(labels, predictions["classes"]))
-        return features, labels, train_op, eval_metric_ops, loss
+        return features, labels, train_op, eval_metric_ops, tf.math.reduce_mean(loss), tf.math.reduce_mean(tf.math.square(loss))
 
     def process_x(self, raw_x_batch):
         return np.array(raw_x_batch)

@@ -56,8 +56,31 @@ class Config():
         self.qffl = False
         self.qffl_q = 0
         
+        self.oort = False
+        self.oort_pacer_step = 20
+        self.oort_pacer_delta = 5
+        self.oort_blacklist_rounds = -1
+        self.oort_blacklist_max_len = 0.3
+        self.oort_clip_bound = 0.98
+        self.oort_round_penalty = 2.0
+        self.oort_exploration_factor = 0.9
+        self.oort_exploration_decay = 0.95
+        self.oort_exploration_min = 0.2
+        self.oort_exploration_alpha = 0.3
+        self.oort_cut_off_util = 0.7
+        self.oort_sample_window = 5.0
+        self.oort_capacity_bin = True
+        self.oort_noise_factor = 0
+        self.oort_round_threshold = 10
+        
+        self.fedcs = True
+        
         logger.info('read config from {}'.format(config_file))
         self.read_config(config_file)
+
+        assert self.oort + self.fedcs <= 1, 'at most one client selection algorithm can be set'
+        assert self.compress_algo is not None + self.qffl <= 1, 'compression and qffl are not supported simultaneously'
+        
         self.log_config()
         
         
@@ -142,6 +165,39 @@ class Config():
                     elif line[0] == 'user_trace':
                         # to be compatibale with old version
                         self.user_trace = line[1].strip()=='True'
+                    # the following is for Oort
+                    elif line[0] == 'oort':
+                        self.oort = line[1].strip()=='True'
+                    elif line[0] == 'oort_pacer_step':
+                        self.oort_pacer_step = int(line[1].strip())
+                    elif line[0] == 'oort_pacer_delta':                    
+                        self.oort_pacer_delta = int(line[1].strip())
+                    elif line[0] == 'oort_blacklist_rounds':
+                        self.oort_blacklist_rounds = int(line[1].strip())
+                    elif line[0] == 'oort_blacklist_max_len':
+                        self.oort_blacklist_max_len = float(line[1].strip())
+                    elif line[0] == 'oort_clip_bound':
+                        self.oort_clip_bound = float(line[1].strip())
+                    elif line[0] == 'oort_round_penalty':
+                        self.oort_round_penalty = float(line[1].strip())
+                    elif line[0] == 'oort_exploration_factor':
+                        self.oort_exploration_factor = float(line[1].strip())
+                    elif line[0] == 'oort_exploration_decay':
+                        self.oort_exploration_decay = float(line[1].strip())
+                    elif line[0] == 'oort_exploration_min':
+                        self.oort_exploration_min = float(line[1].strip())
+                    elif line[0] == 'oort_exploration_alpha':
+                        self.oort_exploration_alpha = float(line[1].strip())
+                    elif line[0] == 'oort_cut_off_util':
+                        self.oort_cut_off_util = float(line[1].strip())
+                    elif line[0] == 'oort_sample_window':
+                        self.oort_sample_window = float(line[1].strip())
+                    elif line[0] == 'oort_capacity_bin':
+                        self.oort_capacity_bin = line[1].strip()=='True'
+                    elif line[0] == 'oort_noise_factor':
+                        self.oort_noise_factor = float(line[1].strip())
+                    elif line[0] == 'oort_round_threshold':
+                        self.oort_round_threshold = float(line[1].strip())
                 except Exception as e:
                     traceback.print_exc()
         if self.real_world and 'realworld' not in self.dataset:
