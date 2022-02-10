@@ -1,3 +1,4 @@
+from client import Client
 import numpy as np
 import timeout_decorator
 import traceback
@@ -5,10 +6,14 @@ from utils.logger import Logger
 from utils.tf_utils import norm_grad
 from collections import defaultdict
 import json
+import math
+from typing import List
+from collections import defaultdict
 
 from grad_compress.grad_drop import GDropUpdate
 from grad_compress.sign_sgd import SignSGDUpdate,MajorityVote
 from comm_effi import StructuredUpdate
+from oort import ClientSampler
 
 from baseline_constants import BYTES_WRITTEN_KEY, BYTES_READ_KEY, LOCAL_COMPUTATIONS_KEY
 
@@ -30,13 +35,30 @@ class Server:
         self.hs = []
         self.clients_info = defaultdict(dict)
         self.structure_updater = None
+        self.sampler = ClientSampler(cfg)
+        self.training_round = 0
+        self.oort_reward = {}
+        self.id2clients = {c.id: c for c in clients}
+        self.deadline = 0
         for c in self.all_clients:
             self.clients_info[str(c.id)]["comp"] = 0
             self.clients_info[str(c.id)]["acc"] = 0.0
             self.clients_info[str(c.id)]["device"] = c.device.device_model
             self.clients_info[str(c.id)]["sample_num"] = len(c.train_data['y'])
+            # the following is for oort
+            if cfg.minibatch is None:
+                num_data = min(len(c.train_data["x"]), self.cfg.max_sample)
+            else :
+                num_data = max(1, int(min(1.0, cfg.minibatch) * len(c.train_data["x"])))
+            self.sampler.registerClient(c.id, {
+                'reward': c.device.get_train_time(num_data, cfg.batch_size, cfg.num_epochs),
+                'duration': 1,
+            })
+            # print(c.id, num_data, cfg.batch_size, cfg.num_epochs, c.device.get_train_time(num_data, cfg.batch_size, cfg.num_epochs))
 
-    def select_clients(self, my_round, possible_clients, num_clients=20):
+
+    def select_clients(self, my_round, possible_clients, num_clients=20,
+                        num_epochs=None, batch_size=None, minibatch=None):
         """Selects num_clients clients randomly from possible_clients.
         
         Note that within function, num_clients is set to
@@ -52,10 +74,30 @@ class Server:
         if num_clients < self.cfg.min_selected:
             logger.info('insufficient clients: need {} while get {} online'.format(self.cfg.min_selected, num_clients))
             return False
-        np.random.seed(my_round)
-        self.selected_clients = np.random.choice(possible_clients, num_clients, replace=False)
+        if self.cfg.oort:
+            selected_cids = self.sampler.sample_clients(num_clients, [c.id for c in possible_clients], my_round+1, self.deadline)
+            self.selected_clients = [self.id2clients[cid] for cid in selected_cids]
+        elif self.cfg.fedcs:
+            selected_cids = self.select_via_fedcs(possible_clients, num_clients, num_epochs, batch_size, minibatch)
+            self.selected_clients = [self.id2clients[cid] for cid in selected_cids]
+        else:
+            np.random.seed(my_round)
+            self.selected_clients = np.random.choice(possible_clients, num_clients, replace=False)
 
         return [(c.num_train_samples, c.num_test_samples) for c in self.selected_clients]
+
+    def select_via_fedcs(self, clients: List[Client], num_clients, num_epochs, batch_size, minibatch):
+        client_time = {}
+        for c in clients:
+            c.set_deadline(self.deadline)
+            client_time[c.id] = c.estimate_round_time(self.get_cur_time(), num_epochs, batch_size, minibatch)
+        sorted_clients = sorted(list(client_time.keys()), key=client_time.get)
+        selected = []
+        for c in sorted_clients:
+            if client_time[c] != -1 and len(selected) < num_clients:
+                selected.append(c)
+        return selected
+
 
     def train_model(self, num_epochs=1, batch_size=10, minibatch=None, clients=None, deadline=-1):
         """Trains self.model on given clients.
@@ -79,6 +121,9 @@ class Server:
             bytes_read: number of bytes read by each client from server
                 dictionary with client ids as keys and integer values.
         """
+        if deadline == -1:
+            deadline = self.deadline
+        self.training_round += 1
         if clients is None:
             clients = self.selected_clients
         sys_metrics = {
@@ -111,7 +156,9 @@ class Server:
                 logger.debug('client {} starts training...'.format(c.id))
                 start_t = self.get_cur_time()
                 # gradiant here is actually (-1) * grad
-                simulate_time_c, comp, num_samples, update, acc, loss, gradiant, update_size, seed, shape_old, loss_old = c.train(start_t, num_epochs, batch_size, minibatch)       
+                simulate_time_c, comp, num_samples, update, acc, loss, gradiant, update_size, seed, shape_old, loss_old, ms_loss \
+                    = c.train(start_t, num_epochs, batch_size, minibatch)    
+
                 logger.debug('client {} simulate_time: {}'.format(c.id, simulate_time_c))
                 logger.debug('client {} num_samples: {}'.format(c.id, num_samples))
                 logger.debug('client {} acc: {}, loss: {}'.format(c.id, acc, loss))
@@ -125,6 +172,9 @@ class Server:
                 sys_metrics[c.id]['loss'] = loss
                 # uploading 
                 self.updates.append((c.id, num_samples, update))
+                
+                if self.cfg.oort:
+                    self.oort_reward[c.id] = [simulate_time_c, ms_loss]
 
                 if self.cfg.structure_k:
                     if not self.structure_updater:
@@ -206,6 +256,19 @@ class Server:
                 self.deltas = []
                 self.hs = []
                 return
+
+            # the following is for oort
+            if self.cfg.oort:
+                for (cid, client_samples, _) in self.updates:
+                    [simulate_time_c, ms_loss] = self.oort_reward[cid]
+                    rwd = math.sqrt(ms_loss)
+                    if self.cfg.oort_capacity_bin:
+                        rwd *= client_samples
+                    if self.cfg.oort_noise_factor > 0:
+                        noise = np.random.normal(0, self.cfg.oort_noise_factor, 1)[0]
+                        rwd = max(1e-2, rwd + noise)
+                    self.sampler.updateScore(cid, rwd, simulate_time_c, self.training_round)
+
             if self.cfg.aggregate_algorithm == 'FedAvg':
                 # aggregate all the clients
                 logger.info('Aggragate with FedAvg')
@@ -283,6 +346,19 @@ class Server:
                 self.deltas = []
                 self.hs = []
                 return
+                                
+            # the following is for oort
+            if self.cfg.oort:
+                for (cid, client_samples, _) in self.updates:
+                    [simulate_time_c, ms_loss] = self.oort_reward[cid]
+                    rwd = math.sqrt(ms_loss)
+                    if self.cfg.oort_capacity_bin:
+                        rwd *= client_samples
+                    if self.cfg.oort_noise_factor > 0:
+                        noise = np.random.normal(0, self.cfg.oort_noise_factor, 1)[0]
+                        rwd = max(1e-2, rwd + noise)
+                    self.sampler.updateScore(cid, rwd, simulate_time_c, self.training_round)
+
             if self.cfg.aggregate_algorithm == 'FedAvg':
                 # aggregate all the clients
                 logger.info('Aggragate with FedAvg after grad compress')
@@ -364,6 +440,18 @@ class Server:
                 self.hs = []
                 return
             
+            # the following is for oort
+            if self.cfg.oort:
+                for (cid, client_samples, _) in self.updates:
+                    [simulate_time_c, ms_loss] = self.oort_reward[cid]
+                    rwd = math.sqrt(ms_loss)
+                    if self.cfg.oort_capacity_bin:
+                        rwd *= client_samples
+                    if self.cfg.oort_noise_factor > 0:
+                        noise = np.random.normal(0, self.cfg.oort_noise_factor, 1)[0]
+                        rwd = max(1e-2, rwd + noise)
+                    self.sampler.updateScore(cid, rwd, simulate_time_c, self.training_round)
+
             # aggregate using q-ffl
             demominator = np.sum(np.asarray(self.hs))
             num_clients = len(self.deltas)

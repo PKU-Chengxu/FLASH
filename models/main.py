@@ -122,14 +122,34 @@ def main():
 
         # 1. selection stage
         logger.info('--------------------- selection stage ---------------------')
-        # 1.1 select clients
+        
+        # 1.1 decide deadline for each client
+        deadline = np.random.normal(cfg.round_ddl[0], cfg.round_ddl[1])
+        while deadline <= 0:
+            deadline = np.random.normal(cfg.round_ddl[0], cfg.round_ddl[1])
+        deadline = int(deadline)
+        if cfg.behav_hete:
+            logger.info('selected deadline: {}'.format(deadline))
+
+        # 1.2 select clients
+        server.deadline = deadline
         cur_time = server.get_cur_time()
         time_window = server.get_time_window() 
         logger.info('current time: {}\ttime window: {}\t'.format(cur_time, time_window))
         online_clients = online(clients, cur_time, time_window)
-        if not server.select_clients(i, 
-                              online_clients, 
-                              num_clients=clients_per_round):
+        
+        '''
+        TODO:
+        NOTICE:
+        Because the clients are selected based on the trace (whether available when training), so we don't need to `prune_client_task`.
+        The computation time in Oort is simulated based on the FLOPs, which is fixed forever (in `prune_client_task`).
+        However this is inaccurate when FedProx is applied, because client can upload part of its computation.
+        Although computation time of current round can be obtained by simulation, 
+            it is NOT FLASH's purpose that is to provide a close-to-real benchmark as much as possible
+        So we use the computation time of last round to guide the oort selection, whose intuition is similar to LRU.
+        '''
+        if not server.select_clients(i, online_clients, clients_per_round, 
+                                    num_epochs=cfg.num_epochs, batch_size=cfg.batch_size, minibatch=cfg.minibatch):
             # insufficient clients to select, round failed
             logger.info('round failed in selection stage!')
             server.pass_time(time_window)
@@ -139,15 +159,6 @@ def main():
         c_ids.sort()
         logger.info("selected num: {}".format(len(c_ids)))
         logger.debug("selected client_ids: {}".format(c_ids))
-        
-        
-        # 1.2 decide deadline for each client
-        deadline = np.random.normal(cfg.round_ddl[0], cfg.round_ddl[1])
-        while deadline <= 0:
-            deadline = np.random.normal(cfg.round_ddl[0], cfg.round_ddl[1])
-        deadline = int(deadline)
-        if cfg.behav_hete:
-            logger.info('selected deadline: {}'.format(deadline))
         
         # 1.3 update simulation time
         server.pass_time(time_window)

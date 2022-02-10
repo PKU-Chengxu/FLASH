@@ -40,10 +40,11 @@ class ClientModel(Model):
             logits=logits)
         predictions = tf.argmax(logits, axis=-1)
         minimize_op = self.optimizer.minimize(
-            loss=loss, global_step=tf.train.get_global_step())
+            loss=tf.math.reduce_mean(loss), global_step=tf.train.get_global_step())
         eval_metric_ops = tf.count_nonzero(
             tf.equal(label_ph, tf.argmax(input=logits, axis=1)))
-        return input_ph, label_ph, minimize_op, eval_metric_ops, tf.math.reduce_mean(loss)
+        self.ms_loss = tf.math.reduce_mean(tf.math.square(loss))
+        return input_ph, label_ph, minimize_op, eval_metric_ops, tf.math.reduce_mean(loss), tf.math.reduce_mean(tf.math.square(loss))
 
     def process_x(self, raw_x_batch):
         x_batch = [self._load_image(i) for i in raw_x_batch]

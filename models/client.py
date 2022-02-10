@@ -84,6 +84,76 @@ class Client:
             self.device.set_device_model("Redmi Note 8")
 
 
+    def estimate_round_time(self, start_t=None, num_epochs=1, batch_size=10, minibatch=None):
+        if minibatch is None:
+            num_data = min(len(self.train_data["x"]), self.cfg.max_sample)
+        else :
+            frac = min(1.0, minibatch)
+            num_data = max(1, int(frac*len(self.train_data["x"])))
+        
+        train_time = self.device.get_train_time(num_data, batch_size, num_epochs)
+        logger.debug('client {}: num data:{}'.format(self.id, num_data))
+        logger.debug('client {}: train time:{}'.format(self.id, train_time))
+        
+        # compute num_data
+        if minibatch is None:
+            num_data = min(len(self.train_data["x"]), self.cfg.max_sample)
+            xs, ys = zip(*random.sample(list(zip(self.train_data["x"], self.train_data["y"])), num_data))
+            data = {'x': xs, 'y': ys}
+        else:
+            frac = min(1.0, minibatch)
+            num_data = max(1, int(frac*len(self.train_data["x"])))
+            xs, ys = zip(*random.sample(list(zip(self.train_data["x"], self.train_data["y"])), num_data))
+            data = {'x': xs, 'y': ys}
+
+        download_time = self.device.get_download_time()
+        upload_time = self.device.get_upload_time(self.model.size) # will be re-calculated after training
+        
+        down_end_time = self.timer.get_future_time(start_t, download_time)
+        logger.debug("client {} download-time-need={}, download-time-cost={} end at {}, "
+                    .format(self.id, download_time, down_end_time-start_t, down_end_time))
+
+        train_end_time = self.timer.get_future_time(down_end_time, train_time)
+        logger.debug("client {} train-time-need={}, train-time-cost={} end at {}, "
+                    .format(self.id, train_time, train_end_time-down_end_time, train_end_time))
+        
+        up_end_time = self.timer.get_future_time(train_end_time, upload_time)
+        logger.debug("client {} upload-time-need={}, upload-time-cost={} end at {}, "
+                    .format(self.id, upload_time, up_end_time-train_end_time, up_end_time))
+
+        self.ori_download_time = download_time  # original
+        self.ori_train_time = train_time
+        self.ori_upload_time = upload_time
+
+        self.act_download_time = down_end_time - start_t # actual
+        self.act_train_time = train_end_time - down_end_time
+        self.act_upload_time = up_end_time - train_end_time   # maybe decrease for the use of conpression algorithm
+
+        if (down_end_time-start_t) > self.deadline:
+            return float('inf')
+        elif (train_end_time-start_t) > self.deadline or (up_end_time-start_t) > self.deadline:
+            if self.cfg.fedprox:
+                ne = -1
+                for i in range(1, num_epochs):
+                    et = self.timer.get_future_time(down_end_time, train_time * i / num_epochs + upload_time)
+                    if et - start_t <= self.deadline:
+                        ne = i
+                    else:
+                        break
+                if ne != -1:
+                    return self.timer.get_future_time(down_end_time, train_time * ne / num_epochs + upload_time)
+            return float('inf')
+        
+        #TODO: NOTICE:
+        # Note that the upload time may decrease when applying grad compression algo.
+        # However, the grad can only be obtained after the training process. 
+        # So we ust the original model size to estimate the total cost.
+        
+        total_cost = self.act_download_time + self.act_train_time + self.act_upload_time
+        if total_cost > self.deadline:
+            return float('inf')
+        return total_cost
+
     def train(self, start_t=None, num_epochs=1, batch_size=10, minibatch=None):
         """Trains on self.model using the client's train_data.
 
@@ -196,14 +266,14 @@ class Client:
                 if self.cfg.fedprox:
                     ne = -1
                     for i in range(1, num_epochs):
-                        et = self.timer.get_future_time(down_end_time, train_time*ne/num_epochs + upload_time)
+                        et = self.timer.get_future_time(down_end_time, train_time*i/num_epochs + upload_time)
                         if et - start_t <= self.deadline:
                             ne = i
                     if self.cfg.no_training:
                         comp = self.model.get_comp(data, num_epochs, batch_size)
-                        update, acc, loss, grad, loss_old = -1,-1,-1,-1,-1
+                        update, acc, loss, grad, loss_old, ms_loss = -1,-1,-1,-1,-1,-1
                     elif self.cfg.fedprox and ne != -1:
-                        comp, update, acc, loss, grad, loss_old = self.model.train(data, ne, batch_size)
+                        comp, update, acc, loss, grad, loss_old, ms_loss = self.model.train(data, ne, batch_size)
                         train_time *= ne / num_epochs
                     else:
                         failed_reason = 'failed when training'
@@ -216,14 +286,14 @@ class Client:
                 if self.cfg.fedprox:
                     ne = -1
                     for i in range(1, num_epochs):
-                        et = self.timer.get_future_time(down_end_time, train_time*ne/num_epochs + upload_time)
+                        et = self.timer.get_future_time(down_end_time, train_time*i/num_epochs + upload_time)
                         if et - start_t <= self.deadline:
                             ne = i
                     if self.cfg.no_training:
                         comp = self.model.get_comp(data, num_epochs, batch_size)
-                        update, acc, loss, grad, loss_old = -1,-1,-1,-1,-1
+                        update, acc, loss, grad, loss_old, ms_loss = -1,-1,-1,-1,-1,-1
                     elif self.cfg.fedprox and ne != -1:
-                        comp, update, acc, loss, grad, loss_old = self.model.train(data, ne, batch_size)
+                        comp, update, acc, loss, grad, loss_old, ms_loss = self.model.train(data, ne, batch_size)
                         train_time *= ne / num_epochs
                     else:
                         failed_reason = 'failed when uploading'
@@ -235,17 +305,17 @@ class Client:
                 if minibatch is None:
                     if self.cfg.no_training:
                         comp = self.model.get_comp(data, num_epochs, batch_size)
-                        update, acc, loss, grad, loss_old = -1,-1,-1,-1,-1
+                        update, acc, loss, grad, loss_old, ms_loss = -1,-1,-1,-1,-1,-1
                     else:
-                        comp, update, acc, loss, grad, loss_old = self.model.train(data, num_epochs, batch_size)
+                        comp, update, acc, loss, grad, loss_old, ms_loss = self.model.train(data, num_epochs, batch_size)
                 else:
                     # Minibatch trains for only 1 epoch - multiple local epochs don't make sense!
                     num_epochs = 1
                     if self.cfg.no_training:
                         comp = self.model.get_comp(data, num_epochs, num_data)
-                        update, acc, loss, grad, loss_old = -1,-1,-1,-1,-1
+                        update, acc, loss, grad, loss_old, ms_loss = -1,-1,-1,-1,-1,-1
                     else:
-                        comp, update, acc, loss, grad, loss_old = self.model.train(data, num_epochs, batch_size)
+                        comp, update, acc, loss, grad, loss_old, ms_loss = self.model.train(data, num_epochs, batch_size)
             num_train_samples = len(data['y'])
             simulate_time_c = train_time + upload_time
             self.actual_comp = comp
@@ -284,7 +354,7 @@ class Client:
                 raise timeout_decorator.timeout_decorator.TimeoutError(failed_reason)
             # if self.cfg.fedprox:
             #     print("client {} finish train task".format(self.id))
-            return simulate_time_c, comp, num_train_samples, update, acc, loss, grad, self.update_size, seed, shape_old, loss_old
+            return total_cost, comp, num_train_samples, update, acc, loss, grad, self.update_size, seed, shape_old, loss_old, ms_loss
         '''
         # Deprecated
         @timeout_decorator.timeout(train_time_limit)

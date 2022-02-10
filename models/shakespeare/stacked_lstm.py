@@ -34,16 +34,15 @@ class ClientModel(Model):
         outputs, _ = tf.nn.dynamic_rnn(stacked_lstm, x, dtype=tf.float32)
         pred = tf.layers.dense(inputs=outputs[:,-1,:], units=self.num_classes)
         
-        loss = tf.reduce_mean(
-            tf.nn.softmax_cross_entropy_with_logits_v2(logits=pred, labels=labels))
+        loss = tf.nn.softmax_cross_entropy_with_logits_v2(logits=pred, labels=labels)
         train_op = self.optimizer.minimize(
-            loss=loss,
+            loss=tf.math.reduce_mean(loss),
             global_step=tf.train.get_global_step())
 
         correct_pred = tf.equal(tf.argmax(pred, 1), tf.argmax(labels, 1))
         eval_metric_ops = tf.count_nonzero(correct_pred)
-
-        return features, labels, train_op, eval_metric_ops, loss
+        self.ms_loss = tf.math.reduce_mean(tf.math.square(loss))
+        return features, labels, train_op, eval_metric_ops, tf.math.reduce_mean(loss), self.ms_loss
 
     def process_x(self, raw_x_batch):
         x_batch = [word_to_indices(word) for word in raw_x_batch]

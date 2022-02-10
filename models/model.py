@@ -29,7 +29,7 @@ class Model(ABC):
         self.graph = tf.Graph()
         with self.graph.as_default():
             tf.set_random_seed(123 + self.seed)
-            self.features, self.labels, self.train_op, self.eval_metric_ops, self.loss = self.create_model()
+            self.features, self.labels, self.train_op, self.eval_metric_ops, self.loss, self.mean_square_loss = self.create_model()
             self.saver = tf.train.Saver()
         config = tf.ConfigProto(log_device_placement=False)
         # config.gpu_options.per_process_gpu_memory_fraction = gpu_fraction
@@ -134,6 +134,7 @@ class Model(ABC):
         train_reslt = self.test(data)
         acc = train_reslt[ACCURACY_KEY]
         loss = train_reslt['loss']
+        ms_loss = train_reslt['ms_loss']
         
         update = self.get_params()
         comp = num_epochs * math.ceil(len(data['y'])/batch_size) * batch_size * self.flops
@@ -141,7 +142,7 @@ class Model(ABC):
         grad = []
         for i in range(len(update)):
             grad.append((params_old[i] - update[i]) / self.lr)
-        return comp, update, acc, loss, grad, loss_old
+        return comp, update, acc, loss, grad, loss_old, ms_loss
 
     def run_epoch(self, data, batch_size):
 
@@ -154,13 +155,13 @@ class Model(ABC):
             self.last_labels = target_data
             
             with self.graph.as_default():
-                    _, tot_acc, loss = self.sess.run([self.train_op, self.eval_metric_ops, self.loss],
+                    _, tot_acc, loss, ms_loss = self.sess.run([self.train_op, self.eval_metric_ops, self.loss, self.mean_square_loss],
                     feed_dict={
                         self.features: input_data,
                         self.labels: target_data
                     })
         acc = float(tot_acc) / input_data.shape[0]
-        return {'acc': acc, 'loss': loss}
+        return {'acc': acc, 'loss': loss, 'ms_loss': ms_loss}
 
     def test(self, data):
         """
@@ -174,12 +175,12 @@ class Model(ABC):
         x_vecs = self.process_x(data['x'])
         labels = self.process_y(data['y'])
         with self.graph.as_default():
-            tot_acc, loss = self.sess.run(
-                [self.eval_metric_ops, self.loss],
+            tot_acc, loss, ms_loss = self.sess.run(
+                [self.eval_metric_ops, self.loss, self.mean_square_loss],
                 feed_dict={self.features: x_vecs, self.labels: labels}
             )
         acc = float(tot_acc) / x_vecs.shape[0]
-        return {ACCURACY_KEY: acc, 'loss': loss}
+        return {ACCURACY_KEY: acc, 'loss': loss, 'ms_loss': ms_loss}
 
     def close(self):
         self.sess.close()
