@@ -17,7 +17,7 @@ Briefly speaking, we develop FLASH to incorporate **heterogeneity** into the fed
 
 **Hardware Heterogeneity**: Each client is bundled with a device type. Each device type has different training speeds and network speeds. We also support self-defined device type(-1) whose parameter can be set manually for more complexed simulation. 
 
-The source code for measure the on-device training time is available in the [OnDeviceTraining](https://github.com/www21submission/flash/tree/master/OnDeviceTraining) directory
+The source code for measure the on-device training time is available in the [OnDeviceTraining](./OnDeviceTraining) directory
 
 **State(Behavior) Heterogeneity**: the state and running environment of participating clients can be various and dynamic. We follow [Google's FL system](https://arxiv.org/pdf/1902.01046.pdf), i.e., clients are available for training only when the device is idle, charging, and connected to WiFi. To simulate state heterogeneity, we provide a default state trace which can be accessed [here](./data/state_traces.json). This default trace is sampled from the large-scale real-world trace (as we use in our paper) that involves upto 136k devices.
 
