@@ -138,7 +138,17 @@ Config file and results are in the `paper_experiments` folder. You can just modi
 - Device Failure
 - Participation Bias
 
+Update 06/02/2022:
 
+We provide a shell to reproduce all the paper experiment. The shell is `<FLASH>/paper_experiments/run.sh`. You can run the script as following:
+
+```shell
+cd paper_experiments
+chmod +x run.sh
+./run.sh [CONFIG_FILE]
+```
+
+This shell uses `models/default.cfg` by default, and you can specify the config file to use. `CONFIG_FILE` is the relative path to `paper_experiments` directory. All of the experiment config files we use are in `paper_experiments` folder.
 
 ## On-device Training
 
